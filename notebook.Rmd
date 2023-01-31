@@ -1,0 +1,236 @@
+---
+title: "GENE-SWITCH Training Jan 2023"
+author: "Malcolm Perry"
+date: '2023-01-30'
+output: html_document
+---
+
+/* Outline general aims */
+
+Some general packages:
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+```
+
+## PWM Kata
+
+Start with simulated SELEX data
+
+```{r, message=FALSE, warning=FALSE}
+library(Biostrings)
+seqs = readDNAStringSet("ALX3.fa")
+```
+
+Count frequency:
+
+```{r}
+PFM = consensusMatrix(seqs)[1:4,] # ignore non ACGT-bases
+colnames(PFM) = 1:ncol(PFM)
+print(PFM)
+```
+
+Calculate PPM with pseudocount:
+
+```{r}
+PFM_adj = PFM + 0.8
+PPM = PFM/colSums(PFM)[col(PFM)]
+print(PPM)
+```
+
+Calculate PWM:
+
+```{r}
+background = c(A=0.25, C=0.25, G=0.25, T=0.25)
+
+PWM = log2(PPM/background) # R recycling trick
+print(PWM)
+```
+
+Display sequence logo:
+
+```{r}
+library(seqLogo)
+seqLogo::seqLogo(PPM)
+```
+
+This is a dimer: should we mention this or choose a different TF?
+
+NB can we link to the nicer Ensembl version here just to show off?
+
+are these really PWMs?
+
+```{r, warnings=FALSE, message=FALSE}
+library(jsonlite)
+library(TFBSTools)
+
+pfms = fromJSON("ensembl_pwms_mono_human.json", simplifyDataFrame = F)
+
+names(pfms) = map_chr(pfms, function(x) x$name)
+
+print(pfms$ALX3)
+```
+```{r}
+make_pwm = function(motif, pseudocount, background) {
+  count_matrix = motif$PFM
+  row.names(count_matrix) = c("A", "C", "G", "T")
+  pfm = PFMatrix(ID=motif$pfm_id, name=motif$name, profileMatrix = count_matrix)
+  toPWM(pfm, pseudocounts = pseudocount, bg = background)
+}
+
+bg = c(A=0.25, C=0.25, G=0.25, T=0.25)
+
+pwm_list = map(pfms, make_pwm, pseudocount=0.8, background=bg)
+
+pwms = invoke(PWMatrixList, pwm_list)
+```
+
+Now we need to find regions to scan with our PWMs. We're working with the ATAC-seq peaks
+which are output from Genrich as part of the GENE-SWITCH pipeline. First we need to specify where our
+files are located:
+
+```{r}
+peak_files = list(
+  embryo = "data/pig_atac_peaks_liver_f_30dpf.bed",
+  birth = "data/pig_atac_peaks_liver_f_1day.bed"
+)
+```
+
+The output from Genrich is the ENCODE narrowPeak format, whichis the same as BED but with additional 
+columns. If we specify these columns we can use the `import` function from the Bioconductor package
+`rtracklayer` to load them. This way, we don't have to manually specify things like column names,
+variable types or 0-based coordinates.
+
+NB `map` is very similar to the base R function `lapply`
+
+```{r}
+library(rtracklayer)
+
+narrow_peak = c(
+  signalValue = "numeric",
+  pValue = "numeric",
+  qValue = "numeric",
+  peak = "integer"
+)
+
+pig_chrs = c(1:18, "X", "Y")
+
+import_narrowpeak = function(file) {
+  gr = import(file, extraCols=narrow_peak)
+  gr = gr[seqnames(gr) %in% pig_chrs] # filter out contigs
+  gr = keepStandardChromosomes(gr)
+  seqlevelsStyle(gr) = "UCSC" # adds "chr" to the start of each chromosome name
+  gr
+}
+
+peak_set = map(peak_files, import_narrowpeak)
+```
+
+If we want to compare peaks between samples, we'll need to create a consensus peakset. We can do this 
+merging the intervals (ie a simple union) in each set using functions in the `GenomicRanges` package. With a
+large number of samples, this can cause intervals to merge and become too large to be biologically meaningful, but with just two samples this is fine.
+
+```{r}
+merged = GenomicRanges::reduce(c(peak_set$embryo, peak_set$birth))
+```
+
+We can then use `findOverlaps` to annotate the peaks as active in either the `embryo` or `birth` samples
+based on overlap with active peaks:
+
+```{r}
+for (name in names(peak_set)) {
+  hits = findOverlaps(merged, peak_set[[name]])
+  mcols(merged)[[name]] = 0
+  mcols(merged)[[name]][queryHits(hits)] = 1
+}
+
+merged
+```
+
+Now we have our PWMs are our peaks loaded and merged, we can use the excellent `motifmatchr` package
+to scan the selected regions of the genome for motif matches. It wraps the `MOODS` tool, which is an
+efficient C++ library for matching peaks. `motifmatchr` simplifies calling `MOODS` and returns the
+results directly into R in a useable format.
+
+NB We are using the BSGenome (Bioconductor) package for the pig genome to simplify this tutorial. There
+is an updated genome build available (Sscrofa 1.11), which can be used instead by replacing the genome argument in the `matchMotifs` call with the path to an indexed Fasta file.
+
+```{r}
+library(motifmatchr)
+library(BSgenome.Sscrofa.UCSC.susScr11) # loads `Sscrofa` genome object
+
+seqlevelsStyle(merged) = "UCSC"
+
+motif_ix <- matchMotifs(pwms, merged[1:10000], genome = Sscrofa)
+
+motif_ix
+```
+
+`matchMotifs` has returned a `SummarizedExperiment` object, a class that R uses to represent the
+results of multiple experiments or analyses in a single object. Internally, it uses an efficient sparse
+matrix class to store the PWM hits. We can get a sense of what the data look like by converting it
+to a simpler `GenomicRanges` object:
+
+```{r, warning=FALSE, message=FALSE}
+library(SummarizedExperiment) # load functions to work with SE class
+
+gr = granges(motif_ix)
+gr$ALX3 = as.integer(assays(motif_ix)$motifMatches[,"ALX3"])
+gr$CTCF = as.integer(assays(motif_ix)$motifMatches[,"CTCF"])
+
+gr
+```
+
+
+Quick check for enrichment:
+
+```{r}
+library(broom)
+
+tfs = names(pwms)
+
+compare_tf = function(se, tf, samples) {
+  hits = assays(se)$motifMatches[,tf]
+  
+  s1 = samples[1]
+  s2 = samples[2]
+  
+  a = sum(hits[rowData(se)[[s1]] == 1])
+  b = sum(hits[rowData(se)[[s1]] == 0])
+  c = sum(hits[rowData(se)[[s2]] == 1])
+  d = sum(hits[rowData(se)[[s2]] == 0])
+  
+  test = binom.test(c(a, c), c(a + b, c + d))
+  df = broom::tidy(test)
+  df$tf = tf
+  select(df, tf, everything())
+}
+
+tf_enrichment = map_df(tfs, function(tf) compare_tf(motif_ix, tf, c("embryo", "birth")))
+```
+
+Plot motif enrichment on a volcano plot:
+
+```{r}
+plot_df = tf_enrichment %>%
+  mutate(
+    log_p = -log10(p.value),
+    of_interest = case_when(
+      estimate > 0.55 ~ "2",
+      estimate < 0.45 ~ "0",
+      TRUE ~ "1"
+    )
+  )
+
+ggplot(plot_df, aes(x=estimate, y=log_p, color=of_interest)) +
+  geom_point() +
+  scale_color_manual(values=c("skyblue1", "grey60", "tomato")) +
+  geom_vline(xintercept=c(0.45, 0.55), lty=2) +
+  xlim(c(0.35, 0.65))
+```
+ Check to see which motif is strongly enriched:
+ 
+```{r}
+filter(plot_df, estimate > 0.55)
+```
+
