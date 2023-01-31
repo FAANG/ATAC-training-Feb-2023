@@ -5,8 +5,6 @@ date: '2023-01-30'
 output: html_document
 ---
 
-/* Outline general aims */
-
 Some general packages:
 
 ```{r, warning=FALSE, message=FALSE}
@@ -56,6 +54,8 @@ seqLogo::seqLogo(PPM)
 
 Interestingly, this TF binds a dimer, which you can clearly see in the logo.
 
+## GENE-SWITCH Analysis
+
 Now let's load PFMs downloaded from the Ensembl Regulation FTP site:
 
 ```{r, warnings=FALSE, message=FALSE}
@@ -65,9 +65,10 @@ library(TFBSTools)
 pfms = fromJSON("data/ensembl_pfms_mono_human.json", simplifyDataFrame = F)
 
 names(pfms) = map_chr(pfms, function(x) x$name)
-
-print(pfms$ALX3)
 ```
+
+We can then use a function to convert these to PWMs:
+
 ```{r}
 make_pwm = function(motif, pseudocount, background) {
   count_matrix = motif$PFM
@@ -179,8 +180,7 @@ gr$CTCF = as.integer(assays(motif_ix)$motifMatches[,"CTCF"])
 gr
 ```
 
-
-Quick check for enrichment:
+Now we can perform a quick check for enrichment. We simply count the number of motif hits in embryo peaks vs the number of hits in the birth peaks, and perform a binomial test.
 
 ```{r}
 library(broom)
@@ -226,7 +226,8 @@ ggplot(plot_df, aes(x=estimate, y=log_p, color=of_interest)) +
   geom_vline(xintercept=c(0.45, 0.55), lty=2) +
   xlim(c(0.35, 0.65))
 ```
- Check to see which motif is strongly enriched:
+
+Check to see which motif is strongly enriched:
  
 ```{r}
 filter(plot_df, estimate > 0.55)
