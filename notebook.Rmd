@@ -13,13 +13,13 @@ Some general packages:
 library(tidyverse)
 ```
 
-## PWM Kata
+## PWM Basics
 
-Start with simulated SELEX data
+Well start by loading some simulated SELEX data.
 
 ```{r, message=FALSE, warning=FALSE}
 library(Biostrings)
-seqs = readDNAStringSet("ALX3.fa")
+seqs = readDNAStringSet("data/ALX3.fa")
 ```
 
 Count frequency:
@@ -54,17 +54,15 @@ library(seqLogo)
 seqLogo::seqLogo(PPM)
 ```
 
-This is a dimer: should we mention this or choose a different TF?
+Interestingly, this TF binds a dimer, which you can clearly see in the logo.
 
-NB can we link to the nicer Ensembl version here just to show off?
-
-are these really PWMs?
+Now let's load PFMs downloaded from the Ensembl Regulation FTP site:
 
 ```{r, warnings=FALSE, message=FALSE}
 library(jsonlite)
 library(TFBSTools)
 
-pfms = fromJSON("ensembl_pwms_mono_human.json", simplifyDataFrame = F)
+pfms = fromJSON("data/ensembl_pfms_mono_human.json", simplifyDataFrame = F)
 
 names(pfms) = map_chr(pfms, function(x) x$name)
 
