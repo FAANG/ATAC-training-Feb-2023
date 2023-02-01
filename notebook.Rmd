@@ -13,9 +13,9 @@ library(tidyverse)
 
 ## PWM Basics
 
-Well start by loading some simulated SELEX data.
+Well start by loading some simulated SELEX data. 
 
-```{r, message=FALSE, warning=FALSE}
+```{r, messages=FALSE, warning=FALSE}
 library(Biostrings)
 seqs = readDNAStringSet("data/ALX3.fa")
 ```
@@ -62,7 +62,7 @@ Now let's load PFMs downloaded from the Ensembl Regulation FTP site:
 library(jsonlite)
 library(TFBSTools)
 
-pfms = fromJSON("data/ensembl_pfms_mono_human.json", simplifyDataFrame = F)
+pfms = fromJSON("data/ensembl_pwms_mono_human.json", simplifyDataFrame = F)
 
 names(pfms) = map_chr(pfms, function(x) x$name)
 ```
@@ -170,7 +170,7 @@ results of multiple experiments or analyses in a single object. Internally, it u
 matrix class to store the PWM hits. We can get a sense of what the data look like by converting it
 to a simpler `GenomicRanges` object:
 
-```{r, warning=FALSE, message=FALSE}
+```{r, warning=FALSE, messages=FALSE}
 library(SummarizedExperiment) # load functions to work with SE class
 
 gr = granges(motif_ix)
@@ -231,5 +231,5 @@ Check to see which motif is strongly enriched:
  
 ```{r}
 filter(plot_df, estimate > 0.55)
-```
+3```
 
